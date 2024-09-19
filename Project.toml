@@ -1,5 +1,18 @@
+name = "VizHRV"
+uuid = "dd0764c3-c7b7-4f25-a541-35f8b8142f81"
+authors = ["Alberto Barradas"]
+version = "0.1.0"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[compat]
+julia = "1"
+
+[targets]
+test = ["Test"]
+
 [deps]
-DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
 LSL = "57c3d5b1-721f-43a0-b20c-e9152d812276"
 TerminalMenus = "dc548174-15c3-5faf-af27-7997cfbde655"
