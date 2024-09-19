@@ -1,6 +1,7 @@
 using GLMakie
 using LSL
-using TerminalMenus
+# using TerminalMenus
+using Statistics
 
 # Get the available streams
 streams = LSL.resolve_streams(timeout=1.0)
@@ -11,9 +12,10 @@ while isempty(streams)
 end
 
 # Select the desired stream
-menu = RadioMenu([source_id(s) for s in streams], pagesize=10);
-selected = request(menu);
-# selected = 2
+stream_names = [source_id(s) for s in streams]
+selected = findfirst(x -> occursin(r"RR", x), stream_names);
+# menu = RadioMenu([source_id(s) for s in streams], pagesize=10);
+# selected = request(menu);
 stream = streams[selected];
 
 # Create the inlet
@@ -28,6 +30,7 @@ timestamp, sample = pull_sample(inlet, timeout=1.0);
 sample_size = 150;
 rr = Observable(zeros(Int32, sample_size));
 nn = Observable(zeros(Int32, sample_size));
+nn50 = Observable(Matrix{Float32}(undef, 0, 2));
 t = Observable(zeros(Float64, sample_size));
 t_rr = Observable(zeros(Float64, sample_size));
 pp_x = Observable(zeros(Int32, sample_size-1));
@@ -45,6 +48,7 @@ ax_nn.yreversed = true;
 ax_pp = Axis(fig[1:2, 6:10], title=title_pp, xlabel="ΔRR[n-1] (ms)", ylabel="ΔRR[n] (ms)");
 lines!(ax_rr, t, rr, color=:blue);
 lines!(ax_nn, t, nn, color=:red);
+scatter!(ax_nn, nn50, color=:red, markersize=10);
 scatter!(ax_pp, pp_x, pp_y, color=:green);
 linkxaxes!(ax_rr, ax_nn);
 display(fig)
@@ -71,6 +75,11 @@ while true
         t_rr[][i] = t[][i-1] + (sample[1] / 1000)
         t[][i] = timestamp
         nn[][i] = sample[1] - rr[][i-1]
+        if abs(nn[][i]) > 50
+            a = nn50[]
+            b = zeros(Float32, 1, 2) + [t[][i] Float32(nn[][i])]
+            nn50[] = [a; b]
+        end
         pp_x[][i-1] = rr[][i-1]
         pp_y[][i-1] = rr[][i]
     end
@@ -79,10 +88,13 @@ while true
     nn[][i+1:end] = repeat([nn[][i]], length(nn[])-i)
     t[][i+1:end] = repeat([t[][i]], length(t[])-i)
     t_rr[][i+1:end] = repeat([t_rr[][i]], length(t_rr[])-i)
+    pp_x[][i:end] = repeat([round(mean(pp_x[]), digits=0)], length(pp_x[])-i+1)
+    pp_y[][i:end] = repeat([round(mean(pp_y[]), digits=0)], length(pp_y[])-i+1)
 
     # Update the plot
     rr[] = rr[]
     nn[] = nn[]
+    nn50[] = nn50[]
     t[] = t[]
     t_rr[] = t_rr[]
     pp_x[] = pp_x[]
@@ -105,6 +117,18 @@ while true
     t_rr[] = [t[][2:end]; t[][end] + (sample[1] / 1000)];
     t[] = [t[][2:end]; timestamp];
     nn[] = [nn[][2:end]; sample[1] - rr[][end-1]];
+    if nn50[][1] < t[][1]
+        idx = findlast(x -> x < t[][1], nn50[][1:end, 1])
+        a = nn50[][idx+1:end, :]
+    else
+        a = nn50[]
+    end
+    if abs(nn[][end]) > 50
+        b = zeros(Float32, 1, 2) + [t[][end] Float32(nn[][end])]
+        nn50[] = [a; b]
+    else
+        nn50[] = a
+    end
     pp_x[] = [pp_x[][2:end]; rr[][end-1]];
     pp_y[] = [pp_y[][2:end]; rr[][end]];
     autolimits!(ax_rr)
