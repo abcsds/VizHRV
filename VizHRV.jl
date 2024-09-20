@@ -7,6 +7,7 @@ using Statistics
 streams = LSL.resolve_streams(timeout=1.0)
 
 while isempty(streams)
+    global streams
     println("No streams found. Retrying...")
     streams = LSL.resolve_streams(timeout=1.0);
 end
@@ -48,7 +49,7 @@ ax_rr = Axis(fig[1, 1:5], title=title_rr, xlabel="Time (s)", ylabel="RR Interval
 ax_rr.yreversed = true;
 ax_nn = Axis(fig[2, 1:5], title=title_nn, xlabel="Time (s)", ylabel="NN Interval (ms)");
 ax_nn.yreversed = true;
-ax_pp = Axis(fig[1:2, 6:10], title=title_pp, xlabel="ΔRR[n-1] (ms)", ylabel="ΔRR[n] (ms)");
+ax_pp = Axis(fig[1:4, 6:10], title=title_pp, xlabel="ΔRR[n-1] (ms)", ylabel="ΔRR[n] (ms)");
 ax_sd = Axis(fig[3:4, 1:5], title=title_st, xlabel="Time (s)", ylabel="SDNN (ms)", yticklabelcolor=:blue);
 ax_rm = Axis(fig[3:4, 1:5], ylabel="RMSSD (ms)", yticklabelcolor=:red, yaxisposition=:right);
 # hidespines!(ax_rm)
@@ -75,6 +76,7 @@ display(fig)
 # Fill in the rest of the arrays
 i = 1
 while true
+    global i
     if i > sample_size
         break
     end
@@ -134,6 +136,7 @@ end
 
 # Update the plot
 while true
+    global timestamp, sample
     timestamp, sample = pull_sample!(sample, inlet, timeout=1.0)
     if timestamp == 0.0 || sample[1] < 0
         continue
