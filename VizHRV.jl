@@ -2,6 +2,8 @@ using GLMakie
 using LSL
 # using TerminalMenus
 using Statistics
+using LombScargle
+using Trapz
 
 # Get the available streams
 streams = LSL.resolve_streams(timeout=1.0)
@@ -10,6 +12,26 @@ while isempty(streams)
     global streams
     println("No streams found. Retrying...")
     streams = LSL.resolve_streams(timeout=1.0);
+end
+
+function lomb_scargle(n)
+    t=cumsum(n).-n[1]
+    t=t./1000
+    plan=LombScargle.plan(t,n,normalization=:psd,minimum_frequency=0.003,maximum_frequency=0.4)
+    return LombScargle.lombscargle(plan)
+end
+
+function get_power(freq,power,min,max)
+    count=1
+    index=[]
+    for f in freq
+        if f>=min && f<max
+            push!(index,count)
+        end
+        count+=1
+    end
+    p=Trapz.trapz(freq[index[1]:index[end]],power[index[1]:index[end]])
+    return p
 end
 
 # Select the desired stream
@@ -40,23 +62,27 @@ t = Observable(zeros(Float64, sample_size));
 t_rr = Observable(zeros(Float64, sample_size));
 pp_x = Observable(zeros(Int32, sample_size-1));
 pp_y = Observable(zeros(Int32, sample_size-1));
+freq = Observable(Float64[]);
+power = Observable(Float64[]);
 
 bpm = Observable(0.0);
 pnn50 = Observable(0.0);
 title_rr = Observable("RR Interval");
 title_nn = Observable("NN Interval");
-title_pp = Observable("ΔRR[n] vs ΔRR[n-1]");
 title_st = Observable("HRV measures");
+title_pp = Observable("ΔRR[n] vs ΔRR[n-1]");
+title_ff = Observable("Power Spectrum");
 
 # Create the plots
 fig = Figure(size=(1920, 1080));
-ax_rr = Axis(fig[1, 1:5], title=title_rr, xlabel="Time (s)", ylabel="RR Interval (ms)");
+ax_rr = Axis(fig[1, 1:5], title=title_rr, ylabel="RR (ms)");
 ax_rr.yreversed = true;
-ax_nn = Axis(fig[2, 1:5], title=title_nn, xlabel="Time (s)", ylabel="NN Interval (ms)");
+ax_nn = Axis(fig[2, 1:5], title=title_nn, ylabel="NN (ms)");
 ax_nn.yreversed = true;
-ax_pp = Axis(fig[1:4, 6:10], title=title_pp, xlabel="ΔRR[n-1] (ms)", ylabel="ΔRR[n] (ms)");
 ax_sd = Axis(fig[3:4, 1:5], title=title_st, xlabel="Time (s)", ylabel="SDNN (ms)", yticklabelcolor=:teal);
 ax_rm = Axis(fig[3:4, 1:5], ylabel="RMSSD (ms)", yticklabelcolor=:coral, yaxisposition=:right);
+ax_pp = Axis(fig[1:2, 6:10], title=title_pp, xlabel="ΔRR[n-1] (ms)", ylabel="ΔRR[n] (ms)");
+ax_ff = Axis(fig[3:4, 6:10], title=title_ff, xlabel="Frequency (Hz)", ylabel="Power (ms²/Hz)");
 # hidespines!(ax_rm)
 # hidedecorations!(ax_rm)
 
@@ -73,6 +99,9 @@ lines!(ax_sd, t, sdnn, color=:teal);
 lines!(ax_rm, t, rmssd, color=:coral);
 
 scatter!(ax_pp, pp_x, pp_y, color=:purple);
+# lines!(ax_ff, freq, power, color=:teal); 
+# FIXME: LombScargle changes the length of freq and power
+
 linkxaxes!(ax_rr, ax_nn);
 linkxaxes!(ax_rr, ax_sd);
 linkxaxes!(ax_rr, ax_rm)
@@ -118,6 +147,10 @@ while true
         rmssd[][i] = std(nn[])
         pp_x[][i-1] = rr[][i-1]
         pp_y[][i-1] = rr[][i]
+
+        empty!(ax_ff)
+        ls=lomb_scargle(Float64.(rr[]))
+        lines!(ax_ff, ls.freq, ls.power, color=:teal)
     end
     # fill the rest of the arrays
     rr[][i+1:end] = repeat([rr[][i]], length(rr[])-i)
@@ -151,6 +184,8 @@ while true
     autolimits!(ax_rm)
     i+=1
 end
+
+# lines!(ax_ff, freq, power, color=:teal);
 
 # Update the plot
 while true
@@ -189,12 +224,24 @@ while true
     pp_x[] = [pp_x[][2:end]; rr[][end-1]];
     pp_y[] = [pp_y[][2:end]; rr[][end]];
 
+    empty!(ax_ff)
+    ls=lomb_scargle(Float64.(rr[]))
+    lines!(ax_ff, ls.freq, ls.power, color=:teal)
+
+    vlf=get_power(ls.freq,ls.power,0.003,0.04)
+    lf=get_power(ls.freq,ls.power,0.04,0.15)
+    hf=get_power(ls.freq,ls.power,0.15,0.4)
+    lfhf_ratio=lf/hf
+    tp=vlf+lf+hf
+
     title_rr[] = "RR Interval (BPM: $(round(bpm[], digits=1)) AVGBPM: $(round(60000 / mean(rr[]), digits=1)))";
     title_nn[] = "NN Interval (PNN50: $(round(pnn50[], digits=2))%)";
     title_st[] = "HRV measures (SDNN: $(round(sdnn[][end], digits=1)), RMSSD: $(round(rmssd[][end], digits=1)))";
+    title_ff[] = "PS (TP: $(round(tp, digits=1)), VLF: $(round(vlf, digits=1)), LF: $(round(lf, digits=1)), HF: $(round(hf, digits=1)), LF/HF: $(round(lfhf_ratio, digits=1)))";
     autolimits!(ax_rr)
     autolimits!(ax_nn)
     autolimits!(ax_pp)
     autolimits!(ax_sd)
     autolimits!(ax_rm)
+    # autolimits!(ax_ff)
 end
