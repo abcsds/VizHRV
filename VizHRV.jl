@@ -28,40 +28,51 @@ sleep(0.1)
 timestamp, sample = pull_sample(inlet, timeout=1.0);
 
 # Create the Observables
-sample_size = 150;
+sample_size = 100;
 rr = Observable(zeros(Int32, sample_size));
 sdnn = Observable(zeros(Float64, sample_size));
 nn = Observable(zeros(Int32, sample_size));
+nn_positive = Observable(zeros(Int32, sample_size));
+nn_negative = Observable(zeros(Int32, sample_size));
 rmssd = Observable(zeros(Float64, sample_size));
 nn50 = Observable(Matrix{Float32}(undef, 0, 2));
 t = Observable(zeros(Float64, sample_size));
 t_rr = Observable(zeros(Float64, sample_size));
 pp_x = Observable(zeros(Int32, sample_size-1));
 pp_y = Observable(zeros(Int32, sample_size-1));
+
+bpm = Observable(0.0);
+pnn50 = Observable(0.0);
 title_rr = Observable("RR Interval");
 title_nn = Observable("NN Interval");
 title_pp = Observable("ΔRR[n] vs ΔRR[n-1]");
 title_st = Observable("HRV measures");
 
 # Create the plots
-fig = Figure();
+fig = Figure(size=(1920, 1080));
 ax_rr = Axis(fig[1, 1:5], title=title_rr, xlabel="Time (s)", ylabel="RR Interval (ms)");
 ax_rr.yreversed = true;
 ax_nn = Axis(fig[2, 1:5], title=title_nn, xlabel="Time (s)", ylabel="NN Interval (ms)");
 ax_nn.yreversed = true;
 ax_pp = Axis(fig[1:4, 6:10], title=title_pp, xlabel="ΔRR[n-1] (ms)", ylabel="ΔRR[n] (ms)");
-ax_sd = Axis(fig[3:4, 1:5], title=title_st, xlabel="Time (s)", ylabel="SDNN (ms)", yticklabelcolor=:blue);
-ax_rm = Axis(fig[3:4, 1:5], ylabel="RMSSD (ms)", yticklabelcolor=:red, yaxisposition=:right);
+ax_sd = Axis(fig[3:4, 1:5], title=title_st, xlabel="Time (s)", ylabel="SDNN (ms)", yticklabelcolor=:teal);
+ax_rm = Axis(fig[3:4, 1:5], ylabel="RMSSD (ms)", yticklabelcolor=:coral, yaxisposition=:right);
 # hidespines!(ax_rm)
 # hidedecorations!(ax_rm)
 
 # Plot the initial data
-lines!(ax_rr, t, rr, color=:blue);
+lines!(ax_rr, t, rr, color=:teal);
+
+hlines!(ax_nn, 0, color=:black);
 lines!(ax_nn, t, nn, color=:red);
-lines!(ax_sd, t, sdnn, color=:blue);
-lines!(ax_rm, t, rmssd, color=:red);
-scatter!(ax_nn, nn50, color=:red, markersize=10);
-scatter!(ax_pp, pp_x, pp_y, color=:green);
+band!(ax_nn, t, 0, nn_negative, color=:deeppink);
+band!(ax_nn, t, 0, nn_positive, color=:blueviolet);
+scatter!(ax_nn, nn50, color=:maroon, markersize=10);
+
+lines!(ax_sd, t, sdnn, color=:teal);
+lines!(ax_rm, t, rmssd, color=:coral);
+
+scatter!(ax_pp, pp_x, pp_y, color=:purple);
 linkxaxes!(ax_rr, ax_nn);
 linkxaxes!(ax_rr, ax_sd);
 linkxaxes!(ax_rr, ax_rm)
@@ -85,6 +96,7 @@ while true
         continue
     end
     rr[][i] = sample[1]
+    bpm[] = 60000 / sample[1]
     if i == 1
         t[][i] = timestamp
         t_rr[][i] = timestamp
@@ -95,6 +107,8 @@ while true
         t_rr[][i] = t[][i-1] + (sample[1] / 1000)
         t[][i] = timestamp
         nn[][i] = sample[1] - rr[][i-1]
+        nn_negative[][i] = nn[][i] < 0 ? nn[][i] : 0
+        nn_positive[][i] = nn[][i] > 0 ? nn[][i] : 0
         if abs(nn[][i]) > 50
             a = nn50[]
             b = zeros(Float32, 1, 2) + [t[][i] Float32(nn[][i])]
@@ -118,6 +132,8 @@ while true
     # Update observables
     rr[] = rr[]
     nn[] = nn[]
+    nn_negative[] = nn_negative[]
+    nn_positive[] = nn_positive[]
     sdnn[] = sdnn[]
     rmssd[] = rmssd[]
     nn50[] = nn50[]
@@ -126,6 +142,8 @@ while true
     pp_x[] = pp_x[]
     pp_y[] = pp_y[]
     println("$i at t: $(t[][i]) ($timestamp) : $(sample[1])")
+    title_rr[] = "RR Interval (BPM: $(round(bpm[], digits=1)) AVGBPM: $(round(60000 / mean(rr[]), digits=1)))";
+    title_st[] = "HRV measures (SDNN: $(round(sdnn[][end], digits=1)), RMSSD: $(round(rmssd[][end], digits=1)))";
     autolimits!(ax_rr)
     autolimits!(ax_nn)
     autolimits!(ax_pp)
@@ -143,9 +161,12 @@ while true
     end
     println("t: $timestamp : $(sample[1])")
     rr[] = [rr[][2:end]; sample[1]];
+    bpm[] = 60000 / sample[1];
     t_rr[] = [t[][2:end]; t[][end] + (sample[1] / 1000)];
     t[] = [t[][2:end]; timestamp];
     nn[] = [nn[][2:end]; sample[1] - rr[][end-1]];
+    nn_negative[] = [nn_negative[][2:end]; nn[][end] < 0 ? nn[][end] : 0];
+    nn_positive[] = [nn_positive[][2:end]; nn[][end] > 0 ? nn[][end] : 0];
     if nn50[][1] < t[][1]
         idx = findlast(x -> x < t[][1], nn50[][1:end, 1])
         a = nn50[][idx+1:end, :]
@@ -162,10 +183,15 @@ while true
             nn50[] = a
         end
     end
+    pnn50[] = 100 * (length(nn50[]) / length(nn[]));
     sdnn[] = [sdnn[][2:end]; std(rr[])];
     rmssd[] = [rmssd[][2:end]; std(nn[])];
     pp_x[] = [pp_x[][2:end]; rr[][end-1]];
     pp_y[] = [pp_y[][2:end]; rr[][end]];
+
+    title_rr[] = "RR Interval (BPM: $(round(bpm[], digits=1)) AVGBPM: $(round(60000 / mean(rr[]), digits=1)))";
+    title_nn[] = "NN Interval (PNN50: $(round(pnn50[], digits=2))%)";
+    title_st[] = "HRV measures (SDNN: $(round(sdnn[][end], digits=1)), RMSSD: $(round(rmssd[][end], digits=1)))";
     autolimits!(ax_rr)
     autolimits!(ax_nn)
     autolimits!(ax_pp)
